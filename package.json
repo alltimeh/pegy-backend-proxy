@@ -1,0 +1,9 @@
+{
+  "name": "pegy-backend-proxy-v2-nse-first",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "yahoo-finance2": "^3.14.0"
+  }
+}
