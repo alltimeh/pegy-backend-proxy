@@ -1,4 +1,6 @@
-import yahooFinance from "yahoo-finance2";
+import { YahooFinance } from "yahoo-finance2";
+
+const yahooFinance = new YahooFinance();
 
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -71,6 +73,7 @@ async function fetchNseQuote(symbol, cookie) {
     0;
 
   const lastPrice = Number(priceInfo.lastPrice || 0);
+
   const dayChangePct =
     previousClose && lastPrice
       ? ((lastPrice - previousClose) / previousClose) * 100
@@ -157,12 +160,14 @@ export default async function handler(req, res) {
         if (!cookie) {
           throw new Error(nseSessionError || "NSE cookie unavailable");
         }
+
         const quote = await fetchNseQuote(symbol, cookie);
         quotes.push(quote);
       } catch (nseError) {
         try {
           const yahooQuote = await fetchYahooQuote(symbol);
           quotes.push(yahooQuote);
+
           errors.push({
             symbol,
             nseError: nseError.message,
