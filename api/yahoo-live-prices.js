@@ -1,127 +1,105 @@
-import YahooFinance from "yahoo-finance2";
-
-const yahooFinance = new YahooFinance();
-
-const yahooFinance = new YahooFinance();
-
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-const NSE_HOME = "https://www.nseindia.com";
-const userAgent =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
-function cleanNseSymbol(symbol) {
-  return String(symbol || "").trim().toUpperCase().replace(".NS", "");
+function cleanSymbol(symbol) {
+  const s = String(symbol || "").trim().toUpperCase();
+  if (!s) return "";
+  return s.endsWith(".NS") ? s : `${s}.NS`;
 }
 
-function toYahooSymbol(symbol) {
-  const clean = cleanNseSymbol(symbol);
-  return clean.endsWith(".NS") ? clean : `${clean}.NS`;
+function stripNs(symbol) {
+  return String(symbol || "").toUpperCase().replace(".NS", "");
 }
 
-function getSetCookie(headers) {
-  if (typeof headers.getSetCookie === "function") {
-    return headers.getSetCookie().join("; ");
-  }
-  return headers.get("set-cookie") || "";
-}
-
-async function getNseCookie() {
-  const response = await fetch(NSE_HOME, {
-    headers: {
-      "User-Agent": userAgent,
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-IN,en;q=0.9"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`NSE home returned ${response.status}`);
-  }
-
-  return getSetCookie(response.headers);
-}
-
-async function fetchNseQuote(symbol, cookie) {
-  const cleanSymbol = cleanNseSymbol(symbol);
-  const url = `${NSE_HOME}/api/quote-equity?symbol=${encodeURIComponent(cleanSymbol)}`;
-
+async function fetchJson(url) {
   const response = await fetch(url, {
     headers: {
-      "User-Agent": userAgent,
-      "Accept": "application/json,text/plain,*/*",
-      "Accept-Language": "en-IN,en;q=0.9",
-      "Referer": `${NSE_HOME}/get-quotes/equity?symbol=${encodeURIComponent(cleanSymbol)}`,
-      "Cookie": cookie
+      "User-Agent": "Mozilla/5.0",
+      "Accept": "application/json,text/plain,*/*"
     }
   });
 
   if (!response.ok) {
-    throw new Error(`NSE quote ${cleanSymbol} returned ${response.status}`);
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `${response.status} ${response.statusText}${text ? ` - ${text.slice(0, 120)}` : ""}`
+    );
   }
 
-  const data = await response.json();
-  const priceInfo = data.priceInfo || {};
+  return response.json();
+}
+
+async function fetchYahooQuoteBatch(symbols) {
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
+
+  const data = await fetchJson(url);
+  const result = data?.quoteResponse?.result || [];
+
+  return result.map((q) => {
+    const previousClose =
+      Number(q.regularMarketPreviousClose || 0) ||
+      Number(q.regularMarketPrice || 0) ||
+      0;
+
+    const lastPrice = Number(q.regularMarketPrice || 0);
+
+    if (!previousClose) {
+      throw new Error(`Yahoo quote ${q.symbol} missing previous close`);
+    }
+
+    return {
+      symbol: q.symbol,
+      yahooSymbol: q.symbol,
+      nseSymbol: stripNs(q.symbol),
+      source: "Yahoo direct quote",
+      previousClose,
+      currentPrice: previousClose,
+      lastPrice,
+      dayChangePct: Number(q.regularMarketChangePercent || 0),
+      rawTimestamp: q.regularMarketTime || ""
+    };
+  });
+}
+
+async function fetchYahooChartFallback(symbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=7d`;
+
+  const data = await fetchJson(url);
+  const result = data?.chart?.result?.[0];
+
+  if (!result) {
+    throw new Error(`Yahoo chart ${symbol} returned no result`);
+  }
+
+  const meta = result.meta || {};
+  const closes = (result.indicators?.quote?.[0]?.close || []).filter(
+    (v) => typeof v === "number"
+  );
 
   const previousClose =
-    Number(priceInfo.previousClose || 0) ||
-    Number(priceInfo.close || 0) ||
-    Number(priceInfo.lastPrice || 0) ||
-    0;
+    Number(meta.previousClose || 0) ||
+    Number(meta.chartPreviousClose || 0) ||
+    Number(closes.length >= 2 ? closes[closes.length - 2] : closes[closes.length - 1] || 0);
 
-  const lastPrice = Number(priceInfo.lastPrice || 0);
-
-  const dayChangePct =
-    previousClose && lastPrice
-      ? ((lastPrice - previousClose) / previousClose) * 100
-      : Number(priceInfo.pChange || 0);
+  const lastPrice = Number(meta.regularMarketPrice || closes[closes.length - 1] || 0);
 
   if (!previousClose) {
-    throw new Error(`NSE quote ${cleanSymbol} missing previous close`);
+    throw new Error(`Yahoo chart ${symbol} missing previous close`);
   }
 
   return {
-    symbol: `${cleanSymbol}.NS`,
-    yahooSymbol: `${cleanSymbol}.NS`,
-    nseSymbol: cleanSymbol,
-    source: "NSE",
+    symbol,
+    yahooSymbol: symbol,
+    nseSymbol: stripNs(symbol),
+    source: "Yahoo chart fallback",
     previousClose,
     currentPrice: previousClose,
     lastPrice,
-    dayChangePct: Number(dayChangePct || 0),
-    rawTimestamp: data.metadata?.lastUpdateTime || data.priceInfo?.lastUpdateTime || ""
-  };
-}
-
-async function fetchYahooQuote(symbol) {
-  const yahooSymbol = toYahooSymbol(symbol);
-  const quote = await yahooFinance.quote(yahooSymbol);
-
-  const previousClose =
-    Number(quote.regularMarketPreviousClose || 0) ||
-    Number(quote.previousClose || 0) ||
-    Number(quote.regularMarketPrice || 0) ||
-    0;
-
-  if (!previousClose) {
-    throw new Error(`Yahoo quote ${yahooSymbol} missing previous close`);
-  }
-
-  return {
-    symbol: yahooSymbol,
-    yahooSymbol,
-    nseSymbol: cleanNseSymbol(symbol),
-    source: "Yahoo fallback",
-    previousClose,
-    currentPrice: previousClose,
-    lastPrice: Number(quote.regularMarketPrice || 0),
-    dayChangePct: Number(quote.regularMarketChangePercent || 0),
-    rawTimestamp: ""
+    dayChangePct: previousClose && lastPrice ? ((lastPrice - previousClose) / previousClose) * 100 : 0,
+    rawTimestamp: meta.regularMarketTime || ""
   };
 }
 
@@ -133,10 +111,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const symbolsParam = req.query.symbols || "";
-    const symbols = symbolsParam
+    const symbols = String(req.query.symbols || "")
       .split(",")
-      .map((symbol) => symbol.trim())
+      .map(cleanSymbol)
       .filter(Boolean);
 
     if (!symbols.length) {
@@ -145,55 +122,42 @@ export default async function handler(req, res) {
       });
     }
 
-    let cookie = "";
-    let nseSessionError = "";
-
-    try {
-      cookie = await getNseCookie();
-    } catch (error) {
-      nseSessionError = error.message;
-    }
-
     const quotes = [];
     const errors = [];
 
-    for (const symbol of symbols) {
+    try {
+      const batchQuotes = await fetchYahooQuoteBatch(symbols);
+      quotes.push(...batchQuotes);
+    } catch (batchError) {
+      errors.push({
+        batchError: batchError.message,
+        fallback: "Trying Yahoo chart endpoint per symbol"
+      });
+    }
+
+    const found = new Set(quotes.map((q) => q.yahooSymbol));
+    const missing = symbols.filter((s) => !found.has(s));
+
+    for (const symbol of missing) {
       try {
-        if (!cookie) {
-          throw new Error(nseSessionError || "NSE cookie unavailable");
-        }
-
-        const quote = await fetchNseQuote(symbol, cookie);
-        quotes.push(quote);
-      } catch (nseError) {
-        try {
-          const yahooQuote = await fetchYahooQuote(symbol);
-          quotes.push(yahooQuote);
-
-          errors.push({
-            symbol,
-            nseError: nseError.message,
-            fallback: "Yahoo used"
-          });
-        } catch (yahooError) {
-          errors.push({
-            symbol,
-            nseError: nseError.message,
-            yahooError: yahooError.message
-          });
-        }
+        quotes.push(await fetchYahooChartFallback(symbol));
+      } catch (error) {
+        errors.push({
+          symbol,
+          yahooChartError: error.message
+        });
       }
     }
 
     if (!quotes.length) {
       return res.status(500).json({
-        error: "No quotes returned from NSE or Yahoo",
+        error: "No quotes returned from Yahoo direct endpoints",
         errors
       });
     }
 
     return res.status(200).json({
-      source: "NSE previous close first, Yahoo fallback",
+      source: "Yahoo direct endpoint, no yahoo-finance2 package",
       lastUpdated: new Date().toLocaleString("en-IN", {
         timeZone: "Asia/Kolkata"
       }),
