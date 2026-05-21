@@ -1,6 +1,6 @@
 {
-  "name": "pegy-backend-proxy-v2-nse-first",
-  "version": "2.0.0",
+  "name": "pegy-backend-proxy-v3-yahoo-fixed",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
