@@ -6,6 +6,7 @@ package.json
 api/
   yahoo-live-prices.js
   market-news.js
+  Trigger redeploy
 
 After upload/deploy on Vercel, test these URLs:
 
