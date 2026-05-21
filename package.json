@@ -1,9 +1,6 @@
 {
-  "name": "pegy-backend-proxy-v3-yahoo-fixed",
-  "version": "3.0.0",
+  "name": "pegy-backend-proxy-v4-yahoo-direct",
+  "version": "4.0.0",
   "private": true,
-  "type": "module",
-  "dependencies": {
-    "yahoo-finance2": "^3.14.0"
-  }
+  "type": "module"
 }
